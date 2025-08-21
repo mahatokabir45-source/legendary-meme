@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Habit Tracker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',sans-serif;}
+body{background:#f0f2f5;color:#333;padding:20px;}
+h1{text-align:center;margin-bottom:20px;color:#007bff;}
+.habit-form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;}
+input, button{padding:8px;border-radius:6px;border:1px solid #ccc;}
+button{cursor:pointer;background:#007bff;color:white;border:none;transition:0.3s;}
+button:hover{background:#0056b3;}
+.habit-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:15px;}
+.habit-card{background:white;padding:15px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);position:relative;}
+.habit-card .complete{position:absolute;top:10px;right:10px;cursor:pointer;font-size:18px;}
+.progress{margin-top:10px;height:10px;background:#e0e0e0;border-radius:5px;overflow:hidden;}
+.progress-bar{height:100%;background:#28a745;width:0;}
+</style>
+</head>
+<body>
+
+<h1>Smart Habit Tracker</h1>
+
+<div class="habit-form">
+  <input type="text" id="habitTitle" placeholder="Habit Title">
+  <input type="number" id="habitTarget" placeholder="Target per day" min="1">
+  <button onclick="addHabit()">Add Habit</button>
+</div>
+
+<div class="habit-list" id="habitList"></div>
+<h2>Analytics</h2>
+<div id="analytics"></div>
+<h2>Suggestions & Reminders</h2>
+<div id="suggestions"></div>
+<h2>Habit Analytics</h2>
+<canvas id="habitChart" width="400" height="200"></canvas>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<h2>Habit Insights</h2>
+<div id="habitInsights"></div>
+<div id="habitNotifications" style="position:fixed; top:20px; right:20px; width:250px;"></div>
+
+<script>
+function getHabits(){ return JSON.parse(localStorage.getItem('habits')||'[]'); }
+function saveHabits(habits){ localStorage.setItem('habits',JSON.stringify(habits)); }
+
+function renderHabits(){
+  const list = document.getElementById('habitList');
+  const habits = getHabits();
+  list.innerHTML='';
+  const today = new Date().toISOString().split('T')[0];
+
+  habits.forEach((h,i)=>{
+    // Reset completed if lastCompletedDate is not today
+    if(h.lastCompletedDate !== today){
+      h.completed = 0;
+      h.lastCompletedDate = today;
+    }
+
+    const progressPercent = h.target ? (h.completed/h.target*100) : 0;
+
+    const card = document.createElement('div');
+    card.className='habit-card';
+    card.innerHTML = `
+      <strong>${h.title}</strong><br>
+      Target: ${h.target || 1} per day<br>
+      Completed today: ${h.completed || 0}<br>
+      Streak: ${h.streak || 0} days
+      <div class="progress"><div class="progress-bar" style="width:${progressPercent}%"></div></div>
+      <span class="complete" onclick="completeHabit(${i})">✅</span>
+    `;
+    list.appendChild(card);
+  });
+
+  
+
+  saveHabits(habits);
+  renderSuggestions();
+  renderAnalytics();
+  generateInsights();
+  renderHabitChart();
+}
+
+function addHabit() {
+  const title = prompt("Habit Title:");
+  if(!title) return alert('Title required!');
+  const targetStr = prompt("Target per day:");
+  const target = parseInt(targetStr);
+  if(isNaN(target) || target<1) return alert('Enter valid target!');
+  const reminder = confirm("Do you want a daily reminder for this habit?");
+  let habits = getHabits();
+  habits.push({title,target,completed:0,lastCompletedDate:null,streak:0,history:{},reminder});
+  saveHabits(habits);
+  renderHabits();
+}
+
+function completeHabit(i){
+  const habits = getHabits();
+  const today = new Date().toISOString().split('T')[0];
+
+  habits[i].completed = (habits[i].completed||0)+1;
+  if(!habits[i].history) habits[i].history = {};
+  habits[i].history[today] = habits[i].completed;
+
+  if(habits[i].completed >= (habits[i].target || 1)){
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate()-1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    habits[i].streak = (habits[i].lastCompletedDate === yesterdayStr ? habits[i].streak+1 : 1);
+    habits[i].lastCompletedDate = today;
+  }
+
+  saveHabits(habits);
+  renderHabits();
+}
+
+// Analytics for last 7 days
+function renderAnalytics(){
+  const habits = getHabits();
+  const analyticsDiv = document.getElementById('analytics');
+  analyticsDiv.innerHTML='';
+  const today = new Date();
+  const last7Days = [];
+  for(let i=6;i>=0;i--){
+    const d = new Date();
+    d.setDate(today.getDate()-i);
+    last7Days.push(d.toISOString().split('T')[0]);
+  }
+
+  habits.forEach(h=>{
+    const habitDiv = document.createElement('div');
+    habitDiv.innerHTML = `<strong>${h.title}</strong><br>`;
+    last7Days.forEach(date=>{
+      const completed = (h.history && h.history[date]) || 0;
+      const dayDiv = document.createElement('span');
+      dayDiv.textContent = completed;
+      dayDiv.style.marginRight='5px';
+      habitDiv.appendChild(dayDiv);
+    });
+    analyticsDiv.appendChild(habitDiv);
+  });
+}
+
+// Habit suggestions & reminders
+function renderSuggestions(){
+  const habits = getHabits();
+  const suggestionsDiv = document.getElementById('suggestions');
+  suggestionsDiv.innerHTML='';
+  const today = new Date().toISOString().split('T')[0];
+  habits.forEach(h=>{
+    const completedToday = h.history && h.history[today] ? true : false;
+    if(!completedToday && h.reminder){
+      const div = document.createElement('div');
+      div.style.padding='5px 10px';
+      div.style.margin='5px 0';
+      div.style.background='#ffeeba';
+      div.style.borderRadius='6px';
+      div.textContent = `Reminder: "${h.title}" not completed today! Current streak: ${h.streak || 0}`;
+      suggestionsDiv.appendChild(div);
+      showNotification(`Reminder: ${h.title} - complete your habit today!`);
+    }
+  });
+}
+
+// Habit insights
+function generateInsights(){
+  const habits = getHabits();
+  const insightsDiv = document.getElementById('habitInsights');
+  insightsDiv.innerHTML='';
+  habits.forEach(h=>{
+    let streak=0, maxStreak=0;
+    const dates = Object.keys(h.history||{}).sort();
+    for(let date of dates){
+      if(h.history[date]>=h.target){
+        streak++;
+        if(streak>maxStreak) maxStreak=streak;
+      } else streak=0;
+    }
+    const div = document.createElement('div');
+    div.style.padding='8px';
+    div.style.margin='5px 0';
+    div.style.background='#f0f4ff';
+    div.style.borderRadius='6px';
+    div.textContent = `${h.title}: Current Streak: ${streak} days, Max Streak: ${maxStreak} days. ${streak===0?'Try to start today!':'Keep it going!'}`;
+    insightsDiv.appendChild(div);
+  });
+}
+
+// Chart for last 7 days
+function renderHabitChart(){
+  const habits = getHabits();
+  const labels=[];
+  const today=new Date();
+  for(let i=6;i>=0;i--){
+    const d=new Date(today);
+    d.setDate(today.getDate()-i);
+    labels.push(d.toISOString().split('T')[0]);
+  }
+
+  const datasets = habits.map(h=>{
+    const data=labels.map(date => h.history && h.history[date]>=h.target ? 1 : 0);
+    return {
+      label: h.title,
+      data: data,
+      fill: false,
+      borderColor:'#'+Math.floor(Math.random()*16777215).toString(16),
+      tension:0.2
+    };
+  });
+
+  const ctx = document.getElementById('habitChart').getContext('2d');
+  new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets},
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{position:'bottom'},
+        title:{display:true,text:'Habit Completion Over Last 7 Days'}
+      },
+      scales:{
+        y:{
+          ticks:{
+            stepSize:1,
+            callback:value=>value?'Done':'Missed'
+          },
+          min:0,
+          max:1
+        }
+      }
+    }
+  });
+}
+
+// Notifications
+function showNotification(text){
+  const notifDiv=document.createElement('div');
+  notifDiv.textContent=text;
+  notifDiv.style.background='#007bff';
+  notifDiv.style.color='#fff';
+  notifDiv.style.padding='10px';
+  notifDiv.style.marginTop='5px';
+  notifDiv.style.borderRadius='6px';
+  notifDiv.style.boxShadow='0 2px 6px rgba(0,0,0,0.2)';
+  document.getElementById('habitNotifications').appendChild(notifDiv);
+  setTimeout(()=>notifDiv.remove(),5000);
+}
+
+// Daily reminder on page load
+function dailyReminder(){
+  const habits=getHabits();
+  const today=new Date().toISOString().split('T')[0];
+  const pending=habits.filter(h=>!(h.history && h.history[today]));
+  if(pending.length>0) alert(`You have ${pending.length} habit(s) pending today!`);
+}
+dailyReminder();
+
+// Initial render
+renderHabits();
+</script>
+
+</body>
+</html>
+
+
+
+
+
